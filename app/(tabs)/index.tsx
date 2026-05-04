@@ -1,98 +1,192 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator, Alert,
+  FlatList,
+  SafeAreaView,
+  StyleSheet, Text,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import { BleManager, Device } from 'react-native-ble-plx';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+const bleManager = new BleManager();
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const router = useRouter();
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [connectedId, setConnectedId] = useState<string | null>(null);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  useEffect(() => {
+    return () => {
+      bleManager.stopDeviceScan();
+      bleManager.destroy();
+    };
+  }, []);
+
+  const startScan = useCallback(() => {
+    setDevices([]);
+    setScanning(true);
+
+    bleManager.startDeviceScan(null, null, (error, device) => {
+      if (error) {
+        Alert.alert('Scan error', error.message);
+        setScanning(false);
+        return;
+      }
+      if (device && device.name) {
+        setDevices(prev => {
+          const exists = prev.find(d => d.id === device.id);
+          return exists ? prev : [...prev, device];
+        });
+      }
+    });
+
+    // Stop after 10 seconds
+    setTimeout(() => {
+      bleManager.stopDeviceScan();
+      setScanning(false);
+    }, 10000);
+  }, []);
+
+  const stopScan = useCallback(() => {
+    bleManager.stopDeviceScan();
+    setScanning(false);
+  }, []);
+
+  return (
+    <SafeAreaView style={styles.screen}>
+      <Text style={styles.heading}>Nearby Devices</Text>
+
+      <TouchableOpacity
+        style={[styles.scanBtn, scanning && styles.scanBtnActive]}
+        onPress={scanning ? stopScan : startScan}
+      >
+        {scanning && (
+          <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
+        )}
+        <Text style={styles.scanBtnText}>
+          {scanning ? 'Scanning… Tap to stop' : 'Scan for Devices'}
+        </Text>
+      </TouchableOpacity>
+
+      {devices.length === 0 && !scanning && (
+        <Text style={styles.empty}>No devices found. Tap Scan to start.</Text>
+      )}
+
+      <FlatList
+        data={devices}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() => router.push({
+              pathname: '/device-detail' as any,
+              params: {
+                name: item.name ?? item.id,
+                connected: String(connectedId === item.id)
+              }
+            })}
+          >
+            <View>
+              <Text style={styles.deviceName}>{item.name ?? 'Unknown'}</Text>
+              <Text style={styles.deviceId}>{item.id}</Text>
+              <Text style={[styles.status, connectedId === item.id && styles.statusOn]}>
+                {connectedId === item.id ? 'Connected' : 'Not connected'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.btn, connectedId === item.id && styles.btnOn]}
+              onPress={() => setConnectedId(
+                connectedId === item.id ? null : item.id
+              )}
+            >
+              <Text style={styles.btnText}>
+                {connectedId === item.id ? 'Disconnect' : 'Connect'}
+              </Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        )}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  screen: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    padding: 16,
+  },
+  heading: {
+    fontSize: 22,
+    fontWeight: '500',
+    marginBottom: 16,
+    marginTop: 8,
+  },
+  scanBtn: {
+    backgroundColor: '#2E75B6',
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+    marginBottom: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  scanBtnActive: {
+    backgroundColor: '#888',
+  },
+  scanBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  empty: {
+    textAlign: 'center',
+    color: '#aaa',
+    marginTop: 40,
+    fontSize: 14,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  deviceName: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 2,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  deviceId: {
+    fontSize: 11,
+    color: '#bbb',
+    marginBottom: 4,
+  },
+  status: {
+    fontSize: 12,
+    color: '#999',
+  },
+  statusOn: {
+    color: '#1D9E75',
+  },
+  btn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  btnOn: {
+    backgroundColor: '#1D9E75',
+    borderColor: '#1D9E75',
+  },
+  btnText: {
+    fontSize: 13,
+    color: '#333',
   },
 });
